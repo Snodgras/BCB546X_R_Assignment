@@ -1,0 +1,191 @@
+---
+title: "R_Assignment"
+author: "Andy Herr"
+date: "October 11, 2018"
+output: html_document
+---
+#Part 1
+##Data Inspection
+- For Data inspection I find it easiest to use UNIX and repeat the steps taken in the previous assinment. 
+
+#SS: I notice that you haven't embedded your commands into script blocks in this .md. This makes it (slightly) harder for me to rerun your analyses.
+
+###fang et al genotypes.txt
+1. **File Size**
+	1. `du -h fang_et_al_genotypes.txt` #SS I can't run this because I can't run UNIX through R studio as stated this way. I can in a script chunk
+		- File Size: 11M
+```{bash}
+du -h fang_et_al_genotypes.txt
+```
+```{bash}
+du -h Input/fang_et_al_genotypes.txt #SS Remember to give your commands paths or indicate you switched directories
+```
+
+2. **wc**
+	1. `wc fang_et_al_genotypes.txt`
+		- Number of Lines: 2783
+		- Number of Words: 2744038
+		- Number of Characters: 11051939 
+```{bash}
+wc Input/fang_et_al_genotypes.txt
+```
+
+2. **Head**
+	1. `head fang_et_al_genotypes.txt`
+		- Way to much printed to screen
+	2. `head -n 2 fang_et_al_genotypes.txt` 
+		- Still unreadable
+
+```{bash}
+head -n 2 Input/fang_et_al_genotypes.txt
+```
+2. **Tail**
+	1. Same issues as with head
+2. **Determine Number of Columns**
+	1. `awk -F "\t" '{print NF; exit}' fang_et_al_genotypes.txt`
+		- Number of columns: 986
+	2. `tail -n +4 fang_et_al_genotypes.txt | awk -F "\t" '{print NF; exit}'`
+		- confirm column number
+###snp_position.txt
+
+```{bash}
+cd Input
+awk -F "\t" '{print NF; exit}' fang_et_al_genotypes.txt
+tail -n +4 fang_et_al_genotypes.txt | awk -F "\t" '{print NF; exit}' #SS I'm not sure why this command is broken
+```
+1. **File Size**
+	1. `du -h snp_position.txt`
+		- File Size: 81K
+2. **wc**
+	1. `wc snp_position.txt`
+		- Lines: 984
+		- Words: 13198
+		- Characters: 82763
+2. **Head**
+	1.	`column -t snp_position.txt | head -n 4`
+		- Looks like SNP data
+		- desired columns are 1,3,4
+	
+2. **Tail**
+	1. `column -t snp_position.txt | tail -n 6`
+		- confirmed snp data
+	
+2. **Determine Number of Columns**
+	1. `awk -F "\t" '{print NF; exit}' snp_position.txt`
+		- Number of Columns: 15
+	
+###Inspection Conclusion
+####fang et al genotypes.txt
+ - File Size: **11M**
+ - Number of Columns: **986**
+ - Number of Lines: **2783**
+ - This is genotype data 
+####snp_position.txt
+ - File Size: **81K**
+ - Number of Column: **15**
+ - Number of Lines: **984** 
+ - This is position data
+
+#SS I like this conclusion summary
+
+##Data Processing	
+```{R}
+#Load tidyverse                       
+library(tidyverse)
+
+#1. Import Data
+genotypes <- read_tsv(file.choose()) #SS Because I'm familiar with this project, I know which input file goes where. However, someone unfamiliar with it wouldn't know what to choose here. I would suggest adding the file name to this command either in the command itself or as a comment.
+     
+position <- read_tsv(file.choose())
+
+#3. Transpose Geno Data
+Geno.Tran <- t(genotypes)
+
+#4. Convert to tibble data and fix column and row names names
+Geno.Tran <- as.tibble(Geno.Tran)
+colnames(Geno.Tran) <- Geno.Tran[1,]
+Geno.Tran <- add_column(Geno.Tran, SNP_ID = colnames(genotypes), .before=1)
+
+#5. Merge Files
+merged <- left_join(Geno.Tran, position, by="SNP_ID")
+```
+
+
+```{R}
+#6. Remove Unwanted Columns
+merged<- filter(merged,!((SNP_ID == "Sample_ID") | (SNP_ID =="JG_OTU"))) %>% select(-cdv_marker_id, -alt_pos, -mult_positions, -amplicon, -cdv_map_feature.name, -gene, -`candidate/random`, -Genaissance_daa_id, -Sequenom_daa_id, -count_amplicons, -count_cmf, -count_gene) #SS What is this command doing? Filtering out all the unneeded columns?
+
+#7. Create Split Files 
+maize <- select(merged, SNP_ID, Chromosome, Position)
+teo <- select(merged, SNP_ID, Chromosome, Position)
+
+#8. Split files
+
+ for (i in 1:length(colnames(merged))) {
+     if (merged[1,i] %in% c("ZMMIL", "ZMMLR", "ZMMMR")) {
+         maize <- cbind(maize, merged[,i])
+     }
+     if(merged[1,i] %in% c("ZMPBA", "ZMPIL", "ZMPJA")) {
+         teo <- cbind(teo, merged[,i])
+     }
+ }
+
+#9. Clean New Files (rm unknown and multiple)
+
+ maize.clean<- filter(maize,!(Chromosome %in% c("multiple", "unknown"))) 
+ maize.clean<- filter(maize.clean,!(Position %in% c("multiple", "unknown")))
+ teo.clean<- filter(teo,!(Chromosome %in% c("multiple", "unknown")))
+ teo.clean<- filter(teo.clean,!(Position %in% c("multiple", "unknown")))
+
+#10. Convert to Position and Chromosome Columns to Integer Values
+
+maize.clean$Chromosome<-as.numeric(as.character(maize.clean$Chromosome))
+maize.clean$Position<-as.numeric(as.character(maize.clean$Position))
+teo.clean$Chromosome<-as.numeric(as.character(teo.clean$Chromosome))
+teo.clean$Position<-as.numeric(as.character(teo.clean$Position))
+
+#11. Produce Files 
+
+for(i in c(1:10)) {
+  filter(maize.clean, Chromosome==i) %>% 
+    dplyr::arrange(Position) %>% 
+    write_tsv(paste("Maize_IN_Chr", i,".txt", sep="")) 
+}
+for(i in c(1:10)) {
+  filter(teo.clean, Chromosome==i) %>% 
+    dplyr::arrange(Position) %>%
+    write_tsv(paste("Teosinte_IN_Chr", i, ".txt", sep=""))
+}
+for(i in c(1:10)) {
+  filter(maize.clean, Chromosome==i) %>% 
+    dplyr::arrange(desc(Position)) %>% 
+    mutate_all(funs(str_replace_all(., fixed("?"), "-"))) %>% 
+    write_tsv(paste("Maize_DE_Chr", i, ".txt", sep="")) 
+}
+for(i in c(1:10)) {
+  filter(teo.clean, Chromosome==i) %>% 
+    dplyr::arrange(desc(Position)) %>% 
+    mutate_all(funs(str_replace_all(., fixed("?"), "-"))) %>% 
+    write_tsv(paste("Teosinte_DE_Chr", i, ".txt", sep=""))
+} #This command took much longer than the others. I'm not sure why. 
+```
+
+#SS Seems like all the files were made correctly-- yay part 1 complete!
+
+#Part 2
+```{R}
+#Load needed packages
+library(reshape2)
+library(ggplot2)
+
+#1. Chromosome with the Most Snps | Chromosome 1 has the most SNPs
+ggplot(position) + geom_bar(aes(x=Chromosome), color="black", fill="green4") + labs(x="Chromosome",y="# of SNPs")
+#SS How did you get # of SNPs?
+
+#2. Determine Heterozigosity 
+ #- I could not figure this one out
+#SS This question has a couple of parts: 1) Make a column indicating NA, homozygous, or heterozygous genotype. Could do this with a mutate command and if statement Ex if genotype == "A/A" | "T/T"..., put "Homozygous" in new column... 2) Use Group as the X axis category and plot a bar chart of this new column 3) use one of the position adjustments in ggplot to make it proportional rather than counts (I think it's position = "Fill", but I'm not sure)
+
+#3. Determine if there are more multiple locations or unknown | There are more unknown #SS How does this differ from the first question? You've made the same plot, though reading something else from it? Is there another graph you could make that would address this question so you can differentiate it from question 1? Like a pie chart?
+ggplot(teo) + geom_bar(aes(x=Chromosome), color="black", fill="green4") + labs(x="Chromosome",y="# of SNPs")
+```
